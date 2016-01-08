@@ -22,8 +22,8 @@ foreach ($track in $itunesobj.SelectedTracks) {
 
 	$art = $TextInfo.ToTitleCase($track.Artist.ToLower())
 	
-	$art = $art -replace 'Presents\.|Presents','pres.'
-	$art = $art -replace 'Featuring\.|Featuring|Feat\.|Feat','ft.'
+	$art = $art -replace 'Presents\.|Presents|Pres\.','pres.'
+	$art = $art -replace 'Featuring\.|Featuring|Feat\.|Feat|Ft\.','ft.'
 	$art = $art -replace 'Vs\.|vs','vs.'
 	
 	if ($oart -cne $art) {$track.Artist = $art.Trim(); $ch =1}
