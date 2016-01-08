@@ -16,6 +16,7 @@ foreach ($track in $itunesobj.SelectedTracks) {
 
 	$name = $name.Replace('[','(')
 	$name = $name.Replace(']',')')
+	$name = $name.Replace('_',' ')
 	$name = $name -replace 'Vs\.|vs','vs.'
 
 	if ($oname -cne $name) {$track.Name = $name.Trim(); $ch = 1}
@@ -25,6 +26,7 @@ foreach ($track in $itunesobj.SelectedTracks) {
 	$art = $art -replace 'Presents\.|Presents|Pres\.','pres.'
 	$art = $art -replace 'Featuring\.|Featuring|Feat\.|Feat|Ft\.','ft.'
 	$art = $art -replace 'Vs\.|vs','vs.'
+	$art = $art.Replace('_',' ')
 	
 	if ($oart -cne $art) {$track.Artist = $art.Trim(); $ch =1}
 	
