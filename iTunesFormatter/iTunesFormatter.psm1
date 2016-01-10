@@ -17,6 +17,7 @@ foreach ($track in $itunesobj.SelectedTracks) {
 	$name = $name.Replace('[','(')
 	$name = $name.Replace(']',')')
 	$name = $name.Replace('_',' ')
+	$name = $name.Replace('Rmx','Remix')
 	$name = $name -replace 'Vs\.|vs','vs.'
 
 	if ($oname -cne $name) {$track.Name = $name.Trim(); $ch = 1}
