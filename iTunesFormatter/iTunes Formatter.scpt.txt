@@ -21,6 +21,19 @@ tell application "iTunes"
 			set chname to (item 1 of splitarr) & " (" & (item 2 of splitarr) & ")"
 		end if
 		
+		-- ARTIST IN TITLE
+		-- STANDARDISE
+		set chname to change {"[Featuring. ", "[Featuring ", "[featuring. ", "[featuring ", "[Feat. ", "[Feat ", "[Ft. ", "[Ft "} into "ft. " in chname
+		set chname to change {"(Featuring. ", "(Featuring ", "(featuring. ", "(featuring ", "(Feat. ", "(Feat ", "(Ft. ", "(Ft "} into "ft. " in chname
+		set chname to change {"Featuring. ", "Featuring ", "featuring. ", "featuring ", "Feat. ", "Feat ", "Ft. ", "Ft "} into "ft. " in chname
+		
+		if "ft." is in chname then
+			set splitarr to splittext chname using " ft."
+			set chname to (item 1 of splitarr)
+			set chart to chart & " ft." & (item 2 of splitarr)
+			set chart to change {")", "]"} into "" in chart
+		end if
+		
 		-- REPLACEMENTS
 		set chname to change "_" into " " in chname
 		set chname to change "Dj" into "DJ" in chname
