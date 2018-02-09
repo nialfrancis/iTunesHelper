@@ -1,0 +1,50 @@
+-- REQUIRES
+-- Uses the satimage osax
+-- Get it at http://www.satimage.fr/software/en/downloads/downloads_companion_osaxen.html
+
+-- Guidance from: Christian Boyce
+-- https://apple.stackexchange.com/a/242809
+
+tell application "iTunes"
+	set seltracks to the selection
+	repeat with currtrk in seltracks
+		-- TITLE CASE
+		set origname to name of currtrk as string
+		set chname to titlecase origname
+		set origart to artist of currtrk as string
+		set chart to titlecase origart
+		
+		-- DASH REMIX TO BRACKETED
+		if " -" is in chname then
+			set chname to change {"- ", " -"} into "-" in chname
+			set splitarr to splittext chname using "-"
+			set chname to (item 1 of splitarr) & " (" & (item 2 of splitarr) & ")"
+		end if
+		
+		-- REPLACEMENTS
+		set chname to change "_" into " " in chname
+		set chname to change "Dj" into "DJ" in chname
+		set chname to change {"[", "]"} into {"(", ")"} in chname
+		set chname to change {"Rmx", "rmx"} into "Remix" in chname
+		set chname to change {"Vs. ", "Vs ", "vs "} into "vs. " in chname
+		
+		set chart to change "_" into " " in chart
+		set chart to change "Dj" into "DJ" in chart
+		set chart to change {"Vs. ", "Vs ", "vs "} into "vs. " in chart
+		set chart to change {"Presents. ", "Presents ", "presents. ", "presents ", "Pres. ", "Pres ", "pres "} into "pres. " in chart
+		set chart to change {"Featuring. ", "Featuring ", "featuring. ", "featuring ", "Feat. ", "Feat ", "Ft. ", "Ft "} into "ft. " in chart
+		
+		considering case
+			if origname is not chname then
+				log origname & " => " & chname
+				set the name of currtrk to chname
+			end if
+			
+			if origart is not chart then
+				log origart & " => " & chart
+				set the artist of currtrk to chart
+			end if
+		end considering
+		
+	end repeat
+end tell
