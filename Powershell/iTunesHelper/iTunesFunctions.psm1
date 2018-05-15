@@ -201,37 +201,40 @@ function Find-iTunesDupes {
 }
 
 function Set-iTunesGenreMulti {
-	if (!$itunesobj) {$script:itunesobj = New-Object -com iTunes.Application}
-	
-	# Update this list with your choices of keys and genre titles
+	###################### Update this list with your choices of keys and genre titles
 	$genretable = [ordered]@{
 		'D' = 'Deep House'
 		'H' = 'House'
 		'Z' = 'Skipped'
 	}
-	#
+	###################### Don't update below
+	if (!$itunesobj) {$script:itunesobj = New-Object -com iTunes.Application}
 	
 	$functionkeys = [ordered]@{
-		'Tab' = 'Player skip 20s ahead'
-		'~' = 'Review previous track'
-		'Shift (left)' = 'Skip track'
+		'Tab'		= 'Player skip 20s ahead'
+		'~'			= 'Review previous track'
+		'Shift (L)'	= 'Skip track'
 	}
 	
-	Write-Output "Options:"
+	Write-Output "Options:`n"
 	
-	$genretable.GetEnumerator() | Select-Object -Property @(
-		@{ Name = 'Key'; Expression={ $_.Name }}
+	( $genretable.GetEnumerator() | Select-Object -Property @(
+		@{ Name = 'Key'; Expression={ $_.Name.PadRight(12,' ') }}
 		@{ Name = 'Genre'; Expression={ $_.Value }}
-	) | Format-Table
-
-	$functionkeys.GetEnumerator() | Select-Object -Property @(
-		@{ Name = 'Key'; Expression={ $_.Name }}
+	) | Format-Table | Out-String).Trim()
+	
+	Write-Output ""
+	
+	( $functionkeys.GetEnumerator() | Select-Object -Property @(
+		@{ Name = 'Key'; Expression={ $_.Name.PadRight(12,' ') }}
 		@{ Name = 'Function'; Expression={ $_.Value }}
-	) | Format-Table
-
+	) | Format-Table | Out-String ).Trim()
+	
 	$itunesobj.Play()
-
+	
 	while ($true) {
+		Write-Progress -Activity $itunesobj.CurrentTrack.Name -Status $itunesobj.CurrentTrack.Artist
+		
 		$newgenre = $false
 		$skip = $false
 		
@@ -242,26 +245,40 @@ function Set-iTunesGenreMulti {
 			16  { $skip = $true }
 			192 { $itunesobj.PreviousTrack(); $itunesobj.PlayerPosition = 65 }
 		}
-
+		
 		if ($genretable[[string]$key.Character]) {
 			$newgenre = $genretable[[string]$key.Character]
 		}
 	
 		if ($newgenre) {
-			if ($itunesobj.CurrentTrack.Genre -eq $null) {$itunesobj.CurrentTrack.Genre = 'null'}
-			$datatable = [PSCustomObject]@{
-				'Name'		= $itunesobj.CurrentTrack.Name.PadRight(30,' ')
+		
+			if ($itunesobj.CurrentTrack.Genre -eq $null) {
+				$oldgenre = 'null'
+			} else {
+				$oldgenre = $itunesobj.CurrentTrack.Genre
+			}
+			
+			try {
+				$itunesobj.CurrentTrack.Genre = $newgenre
+			} catch {
+				$newgenre = 'Not Settable'
+			}
+			
+			[PSCustomObject]@{
+				'Name'		= $itunesobj.CurrentTrack.Name.PadRight(40,' ')
 				'Artist'	= $itunesobj.CurrentTrack.Artist.PadRight(30,' ')
-				'Old Genre'	= $itunesobj.CurrentTrack.Genre.PadRight(15,' ')
+				'Old Genre'	= $oldgenre.PadRight(15,' ')
 				'New Genre'	= $newgenre.PadRight(15,' ') }
-			$itunesobj.CurrentTrack.Genre = $newgenre
+			
 			$datatable
 		}
     
 		if ($newgenre -or $skip) {
-			$itunesobj.NextTrack()
-			$itunesobj.PlayerPosition = 65
-			$itunesobj.Play()
+			try {
+				$itunesobj.NextTrack()
+				$itunesobj.PlayerPosition = 65
+				$itunesobj.Play()
+			} catch {}
 		}
 	}
 }
