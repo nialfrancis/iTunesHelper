@@ -78,7 +78,7 @@ function Format-iTunesData {
 	foreach ($track in $itunesobj.SelectedTracks) {
 		$orign = $track.Name
 		$origa = $track.Artist
-		$tname = $orign
+		$tname = $orign.Trim()
 
 		if ( $tname.Contains(' -') ) {
 			$tname = $tname.Replace('- ','-')
