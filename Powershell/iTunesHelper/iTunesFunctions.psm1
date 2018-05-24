@@ -130,11 +130,11 @@ function Format-iTunesNameFromTitle {
 		$orign = $track.Name
 		
 		if ($ArtistFirst) {
-			$tart = ($track.Name -Split(' - '))[0]
-			$tname = ($track.Name -Split(' - '))[1]
+			$tart = ($track.Name -Split('-'))[0]
+			$tname = ($track.Name -Split('-'))[1]
 		} else {
-			$tart = ($track.Name -Split(' - '))[1]
-			$tname = ($track.Name -Split(' - '))[0]
+			$tart = ($track.Name -Split('-'))[1]
+			$tname = ($track.Name -Split('-'))[0]
 		}
 		
 		$track.Artist = $tart.Trim()
@@ -152,9 +152,11 @@ function Find-iTunesDupes {
 	[cmdletbinding()]
 	Param()
 	$results = @()
+	$threshold = 1100
 	if (!$itunesobj) {$script:itunesobj = New-Object -com iTunes.Application}
 	
 	if ($($itunesobj.SelectedTracks).Count -gt 3) {
+		Write-Progress -Activity "Converting iTunes Library to Powershell Object"
 		$latestlib = $itunesobj.LibraryPlaylist.Tracks
 		$latestlib = $latestlib | Where-Object {$_.Location -ne $null}
 	}
@@ -177,15 +179,23 @@ function Find-iTunesDupes {
 		}
 
 		foreach ($libtrack in $contenders) {
-			$tscore = Get-FuzzyMatchScore (ReplaceRegex $libtrack.Name) (ReplaceRegex $track.Name)
+		
+			if ((ReplaceRegex $libtrack.Name) -eq (ReplaceRegex $track.Name)) {
+				$tscore = $threshold
+			} else {
+				$tscore = Get-FuzzyMatchScore (ReplaceRegex $libtrack.Name) (ReplaceRegex $track.Name)
+			}
+			
 			$artistext = Get-FuzzyMatchScore (ReplaceRegex $libtrack.Artist) (ReplaceRegex $track.Artist)
 			$lendelta = ([timespan]::Parse("0:$($libtrack.Time)")).TotalSeconds - ([timespan]::Parse("0:$($track.Time)")).TotalSeconds
 			$lendelta = [System.Math]::Abs($lendelta)
 			$score = $tscore
 			$score += $artistext
 			$score -= $lendelta * 10
+			
 			Write-Verbose "$($libtrack.Name) $($libtrack.Artist) $score = $tscore + $artistext - $($lendelta * 10)"
-			if ( ($score -gt 1100) -and ($libtrack.TrackDatabaseID -ne $track.TrackDatabaseID) -and ($libtrack.Location) ) {
+			
+			if ( ($score -gt $threshold) -and ($libtrack.TrackDatabaseID -ne $track.TrackDatabaseID) -and ($libtrack.Location) ) {
 				$match = [PSCustomObject]@{
 					'Track'  = $track.Index
 					'Score'  = $score
@@ -197,6 +207,7 @@ function Find-iTunesDupes {
 			}
 		}
 	}
+	
 	$results | Format-Table -AutoSize
 }
 
@@ -207,14 +218,20 @@ function Set-iTunesGenreMulti {
 		'H' = 'House'
 		'Z' = 'Skipped'
 	}
-	###################### Don't update below
-	if (!$itunesobj) {$script:itunesobj = New-Object -com iTunes.Application}
-	
 	$functionkeys = [ordered]@{
 		'Tab'		= 'Player skip 20s ahead'
 		'~'			= 'Review previous track'
-		'Shift (L)'	= 'Skip track'
+		'Shift'		= 'Skip track'
 	}
+	
+	# Hold the modifier key and choose a genre to set the genre to "<genre>, <modifier data>"
+	# Hold the modifier with shift to keep the existing genre and add the modifier data
+	$addgenre = [ordered]@{
+		'LeftAltPressed'	= '(Your extra info)'
+	}
+	###################### Don't update below
+	
+	if (!$itunesobj) {$script:itunesobj = New-Object -com iTunes.Application}
 	
 	Write-Output "Options:`n"
 	
@@ -236,6 +253,7 @@ function Set-iTunesGenreMulti {
 		Write-Progress -Activity $itunesobj.CurrentTrack.Name -Status $itunesobj.CurrentTrack.Artist
 		
 		$newgenre = $false
+		$adddesc = $false
 		$skip = $false
 		
 		$key = $HOST.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
@@ -249,7 +267,16 @@ function Set-iTunesGenreMulti {
 		if ($genretable[[string]$key.Character]) {
 			$newgenre = $genretable[[string]$key.Character]
 		}
-	
+		
+		foreach ($modifier in ($key.ControlKeyState -split(', ').Trim() )) {
+			if ($addgenre[$modifier] -and ($key.Character -or $skip)) {
+				if ($skip -eq $true) {$newgenre = $itunesobj.CurrentTrack.Genre; $skip = $false}
+				if ($newgenre -notmatch $addgenre[$modifier]) {
+					$newgenre = @($newgenre, $addgenre[$modifier]) -join ', '
+				}
+			}
+		}
+		
 		if ($newgenre) {
 		
 			if ($itunesobj.CurrentTrack.Genre -eq $null) {
@@ -268,11 +295,12 @@ function Set-iTunesGenreMulti {
 				'Name'		= $itunesobj.CurrentTrack.Name.PadRight(40,' ')
 				'Artist'	= $itunesobj.CurrentTrack.Artist.PadRight(30,' ')
 				'Old Genre'	= $oldgenre.PadRight(15,' ')
-				'New Genre'	= $newgenre.PadRight(15,' ') }
+				'New Genre'	= $newgenre.PadRight(15,' ')
+			}
 			
 			$datatable
 		}
-    
+		
 		if ($newgenre -or $skip) {
 			try {
 				$itunesobj.NextTrack()
