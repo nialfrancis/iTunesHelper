@@ -1,8 +1,8 @@
 # Author: Nial Francis
-# Date: 08/05/2018
-# Version 1.1
+# Date: 01/02/2020
+# Version 2.1
 # LINK
-#    https://github.com/nialfrancis/iTunesFormatter
+#    https://github.com/nialfrancis/iTunesHelper
 # 
 # EXAMPLE
 #    Format-iTunesData
@@ -11,6 +11,44 @@
 #    'I Can't Get No Sleep - Ken Lou 12" ft. India' by 'Masters At Work'
 #    	to:
 #    'I Can't Get No Sleep (Ken Lou 12")' by 'Masters At Work ft. India'
+
+### VARS
+
+$AutoUpdateYear = $true
+$RegPath = "HKCU:\SOFTWARE\nialfrancis\iTunesHelper"
+
+### FUNCTIONS
+
+function GetDiscogsAPIToken {
+	# ENSURE REGISTRY PATH EXISTS AND PULL PREVIOUS TOKEN
+	if (!(Test-Path $RegPath)) {
+		New-Item -Path $RegPath -Force | Out-Null
+	}
+	
+	$regtokenset = (Get-ItemProperty -Path $RegPath).DiscogsAPIToken
+	$script:dapitoken = $regtokenset
+	
+	do {
+		# LOOP THROUGH AUTHENTICATION TEST AND APIKEY PROMPT UNTIL A WORKING KEY IS ENTERED
+		try {
+			if ($dapitoken -eq $null) {throw}
+			$dac = Invoke-RestMethod "https://api.discogs.com/oauth/identity" -Headers @{ Authorization="Discogs token=$dapitoken" } -ErrorAction Stop
+		} catch {
+			if (!($devpageopen)) {
+				$devpageopen = $true
+			
+				# OPEN THE KEY GENERATION PAGE TO HELP THE USER ACQUIRE IT
+				Start-Process "https://www.discogs.com/settings/developers"
+				Write-Host -ForegroundColor Yellow "The Discogs page which allows you to generate a token has been opened. Please paste your Personal Access Token (click 'Generate new token' if none exists).`nIf the page did not open, browse to https://www.discogs.com/settings/developers"
+			}
+			$dapitoken = Read-Host "Personal Access Token"
+		}
+	} while ( $dac.username -eq $null )
+	
+	if ($dapitoken -ne $regtokenset) {
+		Set-ItemProperty -Path $RegPath -Name 'DiscogsAPIToken' -Value $dapitoken
+	}
+}
 
 function StandardiseNamePart ($str) {
 	$str = $TextInfo.ToTitleCase($str.ToLower())
@@ -27,6 +65,9 @@ function StandardiseNamePart ($str) {
 	$str = $str -replace ('F\./|Ft\./','ft. ')
 	$str = $str -replace ('Vs\.|vs','vs.')
 	
+	# Ensure Mctest is McTest
+	$str = $str -replace '^(Mc).(.*)',('${1}' + ([string]$str[2]).ToUpper() + '${2}')
+	
 	return $str
 }
 
@@ -38,8 +79,10 @@ function ProcessTrackName ($name) {
 	$name = $name.Replace([char]8217,"'")
 	$name = $name.Replace('[','(')
 	$name = $name.Replace(']',')')
+	$name = $name.Replace('{','(')
+	$name = $name.Replace('}',')')
 	
-	if ($name  -cnotmatch "[a-z]+") {
+	if (($name.Length -gt 4) -and ($name -cnotmatch "[a-z]+")) {
 		return StandardiseNamePart $name
 	}
 	
@@ -67,10 +110,8 @@ function ProcessTrackName ($name) {
 }
 
 function Format-iTunesData {
-	param
-	(
-		[switch]$MoveFeatured
-	)
+	[cmdletbinding()]
+	param()
 	
 	if (!$itunesobj) {$script:itunesobj = New-Object -com iTunes.Application}
 	$TextInfo = (Get-Culture).TextInfo
@@ -107,25 +148,41 @@ function Format-iTunesData {
 			}
 		}
 
-		if ($procname -cne $orign) {$track.Name = $procname.Trim(); $ch = 1}
+		if ($procname -cne $orign) {
+			$chn = 1
+			$track.Name = $procname.Trim()
+		}
 
 		$procart = ProcessTrackName $track.Artist
-		if ($artistadd) { $track.AlbumArtist = $procart; $procart = $procart + $artistadd }
+		if ($artistadd) {
+			$track.AlbumArtist = $procart
+			$procart = $procart + $artistadd
+		}
 		$artistadd = $null
-		if ($procart -cne $origa) {$track.Artist = $procart.Trim(); $ch = 1}
+		if ($procart -cne $origa) {
+			$cha = 1
+			$track.Artist = $procart.Trim()
+		}
 		
-		if ($ch -eq 1) { Write-Host "Processed: $orign - $origa" }
+		if ($cha+$chn -ge 1) {
+			Write-Host -NoNewLine 'Processed title: '
+			Write-Host -NoNewLine -Foreground $(if ($chn -eq 1) {'Yellow'} else {'White'}) "$orign"
+			Write-Host -NoNewLine ' - '
+			Write-Host -Foreground $(if ($cha -eq 1) {'Yellow'} else {'White'}) "$origa"
+		}
+		
+		if ($AutoUpdateYear) {
+			Set-iTunesTrackYear
+		}
 	}
 }
 
 function Format-iTunesNameFromTitle {
-	param
-	(
+	param(
 		[switch]$ArtistFirst
 	)
 	
 	if (!$itunesobj) {$script:itunesobj = New-Object -com iTunes.Application}
-
 	foreach ($track in $itunesobj.SelectedTracks) {
 		$orign = $track.Name
 		
@@ -148,9 +205,57 @@ function ReplaceRegex ($str) {
 	return $str -replace '\?','' -replace '\+','' -replace '\(','' -replace '\)',''
 }
 
+function Set-iTunesTrackYear {
+	[cmdletbinding()]
+	param(
+		[switch]$Overwrite
+	)
+	
+	if (!$itunesobj) {$script:itunesobj = New-Object -com iTunes.Application}
+	Add-Type -AssemblyName System.Web
+	
+	foreach ($track in $itunesobj.SelectedTracks) {
+		if (!$track.Year -or $Overwrite ) {
+			if (!$dapitoken) { GetDiscogsAPIToken }
+			
+			$urleartist = [System.Web.HttpUtility]::UrlEncode( ($track.Artist -replace "'",'') )
+			$urletrack = [System.Web.HttpUtility]::UrlEncode( ($track.Name -replace "'",'') )
+			
+			# DISCOGS SEARCHES FROM MORE TO LESS SPECIFIC
+			# TRY A BASIC ARTIST + TRACK SEARCH EG. FOR A SINGLE
+			$res = Invoke-RestMethod "https://api.discogs.com/database/search?track=$urletrack&artist=$urleartist" -Headers @{ Authorization="Discogs token=$dapitoken" }
+			# IF NOTHING, TRY AN ALBUM SEARCH
+			if (!$res.results -and $track.Album) {
+				$urlealbum = [System.Web.HttpUtility]::UrlEncode( ($track.Album -replace "'",'') )
+				$res = Invoke-RestMethod "https://api.discogs.com/database/search?type=release&track=$urletrack&title=$urlealbum" -Headers @{ Authorization="Discogs token=$dapitoken" }
+			}
+			# IF NOTHINNG, TRY A BROAD ARTIST + TRACK SEARCH
+			if (!$res.results) {
+				$res = Invoke-RestMethod "https://api.discogs.com/database/search?track=$urletrack&query=$urleartist" -Headers @{ Authorization="Discogs token=$dapitoken" }
+			}
+			
+			try {
+				$ysel = ($res.results | Where-Object { $_.year -ne $null } | Select-Object -Property year,id,type | Sort-Object -Property year)[0]
+			} catch {
+				Write-Host "No results for",$track.Artist,'-',$track.Name
+				return
+			}
+			
+			$discogsid = $ysel.type[0]+$ysel.id
+			Write-Host -NoNewLine 'Modified year:',$track.Artist,'-',$track.Name,'FROM:',$track.Year,'TO: '
+			Write-Host -NoNewLine -Foreground 'Yellow' $ysel.year
+			Write-Host " from Discogs entry $discogsid"
+			$track.Year = $ysel.year
+		} else {
+			Write-Verbose "Year unchanged"
+		}
+	}
+	return
+}
+
 function Find-iTunesDupes {
 	[cmdletbinding()]
-	Param()
+	param()
 	$results = @()
 	$threshold = 1100
 	if (!$itunesobj) {$script:itunesobj = New-Object -com iTunes.Application}
@@ -211,25 +316,35 @@ function Find-iTunesDupes {
 	$results | Format-Table -AutoSize
 }
 
-function Set-iTunesGenreMulti {
-	###################### Update this list with your choices of keys and genre titles
-	$genretable = [ordered]@{
-		'D' = 'Deep House'
-		'H' = 'House'
-		'Z' = 'Skipped'
+function Remove-iTunesSecondaryGenres {
+	if (!$itunesobj) {$script:itunesobj = New-Object -com iTunes.Application}
+	
+	foreach ($track in $itunesobj.SelectedTracks) {
+		$dg = ($track.Genre -Split (', '))[0]
+		$track.Genre = $dg
 	}
+}
+
+function Set-iTunesGenreMulti {
+	param(
+		[Parameter()]
+		[ValidateSet('Common','SecondReview')]
+		[string]$StyleList = 'Common'
+	)
+	
+	if (!($stylelistloaded)) { . "$PSScriptRoot\StyleLists.ps1"; 'loaded' }
+	
+	if ($StyleList -eq 'Common') {
+		$genretable = $genrecommon
+	} elseif ($StyleList -eq 'SecondReview') {
+		$genretable = $genrereview
+	}
+	
 	$functionkeys = [ordered]@{
 		'Tab'		= 'Player skip 20s ahead'
 		'~'			= 'Review previous track'
 		'Shift'		= 'Skip track'
 	}
-	
-	# Hold the modifier key and choose a genre to set the genre to "<genre>, <modifier data>"
-	# Hold the modifier with shift to keep the existing genre and add the modifier data
-	$addgenre = [ordered]@{
-		'LeftAltPressed'	= '(Your extra info)'
-	}
-	###################### Don't update below
 	
 	if (!$itunesobj) {$script:itunesobj = New-Object -com iTunes.Application}
 	
@@ -247,15 +362,28 @@ function Set-iTunesGenreMulti {
 		@{ Name = 'Function'; Expression={ $_.Value }}
 	) | Format-Table | Out-String ).Trim()
 	
+	Write-Output ""
+	
+	( $addgenre.GetEnumerator() | Select-Object -Property @(
+		@{ Name = 'Key'; Expression={ $_.Name.PadRight(12,' ') }}
+		@{ Name = 'Adds Genre'; Expression={ $_.Value }}
+	) | Format-Table | Out-String ).Trim()
+	
 	$itunesobj.Play()
 	
 	while ($true) {
-		Write-Progress -Activity $itunesobj.CurrentTrack.Name -Status $itunesobj.CurrentTrack.Artist
-		
+		if ($itunesobj.CurrentTrack.Genre -eq $null) {
+			$oldgenre = 'null'
+		} else {
+			$oldgenre = $itunesobj.CurrentTrack.Genre
+		}
 		$newgenre = $false
-		$adddesc = $false
 		$skip = $false
+		$phpercent = ($itunesobj.PlayerPosition / $itunesobj.CurrentTrack.Finish) * 100
 		
+		
+		Write-Progress -Activity ("{0}. {1}" -f $itunesobj.CurrentTrack.Index,$itunesobj.CurrentTrack.Name) -Status $itunesobj.CurrentTrack.Artist -CurrentOperation $oldgenre -PercentComplete $phpercent
+				
 		$key = $HOST.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
 		
 		switch ($key.VirtualKeyCode) {
@@ -270,7 +398,7 @@ function Set-iTunesGenreMulti {
 		
 		foreach ($modifier in ($key.ControlKeyState -split(', ').Trim() )) {
 			if ($addgenre[$modifier] -and ($key.Character -or $skip)) {
-				if ($skip -eq $true) {$newgenre = $itunesobj.CurrentTrack.Genre; $skip = $false}
+				if ($skip -eq $true) {$newgenre = $oldgenre; $skip = $false}
 				if ($newgenre -notmatch $addgenre[$modifier]) {
 					$newgenre = @($newgenre, $addgenre[$modifier]) -join ', '
 				}
@@ -278,12 +406,6 @@ function Set-iTunesGenreMulti {
 		}
 		
 		if ($newgenre) {
-		
-			if ($itunesobj.CurrentTrack.Genre -eq $null) {
-				$oldgenre = 'null'
-			} else {
-				$oldgenre = $itunesobj.CurrentTrack.Genre
-			}
 			
 			try {
 				$itunesobj.CurrentTrack.Genre = $newgenre
@@ -294,8 +416,8 @@ function Set-iTunesGenreMulti {
 			[PSCustomObject]@{
 				'Name'		= $itunesobj.CurrentTrack.Name.PadRight(40,' ')
 				'Artist'	= $itunesobj.CurrentTrack.Artist.PadRight(30,' ')
-				'Old Genre'	= $oldgenre.PadRight(15,' ')
-				'New Genre'	= $newgenre.PadRight(15,' ')
+				'Old Genre'	= $oldgenre.PadRight(30,' ')
+				'New Genre'	= $newgenre.PadRight(30,' ')
 			}
 			
 			$datatable
